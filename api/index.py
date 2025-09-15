@@ -6,24 +6,26 @@ import re
 
 app = Flask(__name__)
 
+
+t2d = text2digits.Text2Digits()
+
 def text_to_number(text):
-    """Convert English text number to integer"""
-    # Remove any non-alphanumeric characters and convert to lowercase
-    text = re.sub(r'[^a-zA-Z\s-]', '', text.lower())
-    
-    # Special case for zero
-    if text in ['zero', 'nil']:
-        return 0
-    
-    # Dictionary for special number words
-    number_words = {
-        'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
-        'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10
-    }
-    
-    if text in number_words:
-        return number_words[text]
-    
+    """Convert English text number to integer (via text2digits)"""
+    if text is None:
+        raise ValueError("Unable to convert text to number")
+
+    # normalize & keep letters/spaces/hyphens for cases like "forty-two"
+    s = re.sub(r'[^a-zA-Z\s-]', '', str(text).lower()).strip()
+    s = re.sub(r'-$', '', s)  # tolerate trailing hyphen: "seven-"
+    if s == 'nil':
+        s = 'zero'
+
+    # convert words → digits; expect a single integer token
+    converted = t2d.convert(s).strip()
+
+    if re.fullmatch(r'[+-]?\d+', converted):
+        return int(converted)
+
     raise ValueError("Unable to convert text to number")
 
 def number_to_text(number):

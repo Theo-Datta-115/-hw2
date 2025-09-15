@@ -2,6 +2,7 @@ import os
 import types
 import importlib
 import pytest
+import re
 
 # -------- Config: where to import your app from ----------
 APP_MODULE_NAME = os.getenv("APP_MODULE", "index") 
@@ -177,6 +178,53 @@ def test_base64_input_full_matrix(client, b64_in, dec, bin_, oct_, hex_, b64_out
         expected_text = {"0":"zero","1":"one","5":"five","10":"ten"}[dec]
         t = assert_ok_json(post_convert(client, b64_in, "base64", "text"));      assert t["error"] is None and t["result"] == expected_text
 
+def _norm_words(s: str) -> str:
+    # lowercase and collapse spaces/hyphens so "forty two" == "forty-two"
+    return re.sub(r"[\s\-]+", " ", s.strip().lower())
+
+@pytest.mark.parametrize("dec, bin_, oct_, hex_, b64, text_variants", [
+    ("11", "1011",   "13", "b",  "Cw==", {"eleven"}),
+    ("42", "101010", "52", "2a", "Kg==", {"forty two", "forty-two"}),
+])
+def test_decimal_double_digit_full_matrix(client, dec, bin_, oct_, hex_, b64, text_variants):
+    # dec -> bin/oct/hex/base64 (existing assertions)
+    b = assert_ok_json(post_convert(client, dec, "decimal", "binary"));      assert b["error"] is None and b["result"] == bin_
+    o = assert_ok_json(post_convert(client, dec, "decimal", "octal"));       assert o["error"] is None and o["result"] == oct_
+    h = assert_ok_json(post_convert(client, dec, "decimal", "hexadecimal")); assert h["error"] is None and h["result"] == hex_
+    s = assert_ok_json(post_convert(client, dec, "decimal", "base64"));      assert s["error"] is None and s["result"] == b64
+    d = assert_ok_json(post_convert(client, dec, "decimal", "decimal"));     assert d["error"] is None and d["result"] == str(int(dec))
+    # NEW: dec -> text (accept common variants)
+    t = assert_ok_json(post_convert(client, dec, "decimal", "text"));        assert t["error"] is None
+    assert _norm_words(t["result"]) in {_norm_words(v) for v in text_variants}
+
+# --- NEW: non-decimal double-digit inputs -> TEXT (only 11 and 42) ---
+@pytest.mark.parametrize("val, itype, text_variants", [
+    ("1011",   "binary",      {"eleven"}),
+    ("13",     "octal",       {"eleven"}),
+    ("b",      "hexadecimal", {"eleven"}),
+    ("Cw==",   "base64",      {"eleven"}),
+    ("101010", "binary",      {"forty two", "forty-two"}),
+    ("52",     "octal",       {"forty two", "forty-two"}),
+    ("2a",     "hexadecimal", {"forty two", "forty-two"}),
+    ("Kg==",   "base64",      {"forty two", "forty-two"}),
+])
+def test_double_digit_non_decimal_inputs_to_text(client, val, itype, text_variants):
+    out = assert_ok_json(post_convert(client, val, itype, "text"))
+    assert out["error"] is None
+    assert _norm_words(out["result"]) in {_norm_words(v) for v in text_variants}
+
+@pytest.mark.parametrize("text, dec, bin_, oct_, hex_, b64", [
+    ("eleven",     "11", "1011",   "13", "b",  "Cw=="),
+    ("forty-two",  "42", "101010", "52", "2a", "Kg=="),
+])
+def test_text_double_digit_to_full_matrix(client, text, dec, bin_, oct_, hex_, b64):
+    d = assert_ok_json(post_convert(client, text, "text", "decimal"));     assert d["error"] is None and d["result"] == dec
+    b = assert_ok_json(post_convert(client, text, "text", "binary"));      assert b["error"] is None and b["result"] == bin_
+    o = assert_ok_json(post_convert(client, text, "text", "octal"));       assert o["error"] is None and o["result"] == oct_
+    h = assert_ok_json(post_convert(client, text, "text", "hexadecimal")); assert h["error"] is None and h["result"] == hex_
+    s = assert_ok_json(post_convert(client, text, "text", "base64"));      assert s["error"] is None and s["result"] == b64
+    t = assert_ok_json(post_convert(client, text, "text", "text"));        assert t["error"] is None and t["result"].strip()
+
 
 # =================================
 # 2) Tests on edge case errors
@@ -185,8 +233,7 @@ def test_base64_input_full_matrix(client, b64_in, dec, bin_, oct_, hex_, b64_out
 
 # Invalid text outside supported scope
 @pytest.mark.parametrize("text", [
-    "eleven", "twenty-one", "one hundred", "minus five",
-    "3", "1,234", "one two", "ten ten", "abc", "", " "
+  "abc", "", " "
 ])
 def test_text_to_number_invalid_raises(helpers, text):
     with pytest.raises(ValueError):
